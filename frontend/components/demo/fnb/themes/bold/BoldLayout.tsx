@@ -4,6 +4,7 @@ import { BoldMenu } from './BoldMenu';
 import { BoldLookbook } from './BoldLookbook';
 import { BoldReviews } from './BoldReviews';
 import { BoldFooter } from './BoldFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function BoldLayout() {
   const { client } = useFnbDemo();
@@ -21,9 +22,9 @@ export function BoldLayout() {
       `}} />
       <div className="bg-neutral-50 text-neutral-900 antialiased selection:bg-brand-primary selection:text-white pb-20 font-sans-fastfood">
         <BoldHeader />
-        <BoldMenu />
-        <BoldLookbook />
-        <BoldReviews />
+        {isSectionVisible('menu', client.hiddenSections) && <BoldMenu />}
+        {isSectionVisible('gallery', client.hiddenSections) && <BoldLookbook />}
+        {isSectionVisible('reviews', client.hiddenSections) && <BoldReviews />}
         <BoldFooter />
       </div>
     </>

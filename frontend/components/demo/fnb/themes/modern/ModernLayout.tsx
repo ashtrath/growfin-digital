@@ -4,6 +4,7 @@ import { ModernGallery } from './ModernGallery';
 import { ModernReviews } from './ModernReviews';
 import { ModernFooter } from './ModernFooter';
 import { useFnbDemo } from '../../core/FnbDemoContext';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function ModernLayout() {
   const { client } = useFnbDemo();
@@ -12,6 +13,7 @@ export function ModernLayout() {
     : ['hero', 'menu', 'gallery', 'reviews'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <ModernHeader key={id} />;
       case 'menu': return <ModernMenu key={id} />;

@@ -93,6 +93,8 @@ export interface TenantData {
   owner_name?: string;
   email?: string;
   image_url?: string;
+  metadata?: any;
+  draft_metadata?: any;
 }
 
 export interface TransactionData {
@@ -713,9 +715,21 @@ export function AdminConsoleClient({
 
       if (!res.ok) throw new Error(await res.text());
 
+      const updatedMeta = selectedTenant.metadata ? {
+        ...selectedTenant.metadata,
+        ...(editForm.custom_domain && selectedTenant.metadata.domainRequest ? {
+          domainRequest: {
+            ...selectedTenant.metadata.domainRequest,
+            status: 'active',
+            activatedAt: new Date().toISOString(),
+          }
+        } : {})
+      } : selectedTenant.metadata;
+
       const updated: TenantData = {
         ...selectedTenant,
         ...payload,
+        metadata: updatedMeta,
         owner_name: editForm.owner_name,
         email: editForm.email,
       };
@@ -1517,11 +1531,18 @@ export function AdminConsoleClient({
                                         <span className="font-semibold text-slate-900 text-sm leading-tight truncate">
                                           {tenant.name}
                                         </span>
-                                        {tenant.custom_domain && (
+                                        {tenant.custom_domain ? (
                                           <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.2 rounded font-mono font-medium">
                                             {tenant.custom_domain}
                                           </span>
-                                        )}
+                                        ) : (tenant.metadata?.domainRequest?.status === 'pending' || tenant.draft_metadata?.domainRequest?.status === 'pending') ? (
+                                          <span 
+                                            className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded font-bold inline-flex items-center gap-1 animate-pulse"
+                                            title={`Domain Cadangan: ${(tenant.metadata || tenant.draft_metadata)?.domainRequest?.alternativeDomain || '-'} | WA: ${(tenant.metadata || tenant.draft_metadata)?.domainRequest?.whatsappContact || '-'}`}
+                                          >
+                                            🔔 Req Domain: {(tenant.metadata || tenant.draft_metadata)?.domainRequest?.requestedDomain}
+                                          </span>
+                                        ) : null}
                                       </div>
                                       <div className="flex items-center gap-2 text-xs text-slate-400 font-mono truncate mt-0.5">
                                         {tenant.owner_name && <span className="font-sans text-slate-600">{tenant.owner_name}</span>}
@@ -2277,6 +2298,34 @@ export function AdminConsoleClient({
 
                           {/* Custom Domain */}
                           <div className="space-y-1.5">
+                            {((selectedTenant?.metadata || selectedTenant?.draft_metadata)?.domainRequest) && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-1.5 mb-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                                    🔔 Permintaan Setup Domain Klien:
+                                  </span>
+                                  <span className={`px-2 py-0.2 rounded text-[10px] font-bold ${
+                                    (selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.status === 'active'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    Status: {(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.status}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] space-y-0.5">
+                                  <p><strong>Pilihan 1:</strong> <span className="font-mono text-blue-600 font-bold">{(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.requestedDomain}</span></p>
+                                  {(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.alternativeDomain && (
+                                    <p><strong>Cadangan:</strong> <span className="font-mono text-slate-700">{(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.alternativeDomain}</span></p>
+                                  )}
+                                  {(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.whatsappContact && (
+                                    <p><strong>WhatsApp:</strong> <span className="text-emerald-700 font-semibold">{(selectedTenant.metadata || selectedTenant.draft_metadata).domainRequest.whatsappContact}</span></p>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-slate-400 italic">
+                                  * Mengisi kolom Custom Domain di bawah otomatis mengubah status permintaan menjadi active.
+                                </p>
+                              </div>
+                            )}
                             <label className="text-xs font-semibold text-slate-700">Custom Domain</label>
                             <Input
                               value={editForm.custom_domain}

@@ -28,7 +28,7 @@ export default function middleware(req: NextRequest) {
   const path = url.pathname;
 
   // Define reserved paths for the main domain
-  const reservedPaths = ['/dashboard', '/login', '/register', '/demo', '/checkout', '/admin', '/back-stage'];
+  const reservedPaths = ['/dashboard', '/login', '/register', '/demo', '/checkout', '/back-stage'];
   const isReserved = reservedPaths.some(reserved => path.startsWith(reserved)) || path === '/';
 
   // 1. Handle Subdomains & Custom Domains (e.g. kopisenja.growfin.my.id or www.kopisenja.com)

@@ -31,7 +31,7 @@ export function OwnerToolbar({ onEditClick, onPublishClick }: OwnerToolbarProps)
   }
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-10 fade-in duration-500">
+    <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-10 fade-in duration-500">
       <div className="bg-[#14141A]/90 backdrop-blur-md border border-[#262633] rounded-full p-2 flex items-center gap-2 shadow-2xl">
         
         {/* Info Text (Hidden on small screens) */}

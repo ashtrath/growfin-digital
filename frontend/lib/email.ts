@@ -1,6 +1,7 @@
 import { Resend } from 'resend';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { siteConfig } from '@/lib/site-config';
+import { getAdminEmails } from '@/lib/admin';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -361,4 +362,96 @@ export async function sendFomoReminderEmail(
     return { success: false, error: error?.message || String(error) };
   }
 }
+
+export interface DomainRequestEmailParams {
+  businessName: string;
+  slug: string;
+  requestedDomain: string;
+  alternativeDomain?: string;
+  whatsappContact?: string;
+  userEmail?: string;
+}
+
+/**
+ * Mengirim notifikasi permintaan setup domain baru ke Super Admin via Resend
+ */
+export async function sendDomainRequestAdminEmail(
+  params: DomainRequestEmailParams
+): Promise<{ success: boolean; error?: any }> {
+  const { businessName, slug, requestedDomain, alternativeDomain, whatsappContact, userEmail } = params;
+  const adminEmails = getAdminEmails();
+
+  if (!adminEmails || adminEmails.length === 0) {
+    console.warn('[Domain Request Email] No ADMIN_EMAILS configured in environment.');
+    return { success: false, error: 'No admin emails configured' };
+  }
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'Growfin System <hello@growfin.my.id>',
+      to: adminEmails,
+      subject: `🌐 Permintaan Setup Domain Baru: ${requestedDomain} dari ${businessName}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Permintaan Setup Domain Baru</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0B0E; color: #fff; padding: 24px;">
+          <div style="max-width: 560px; margin: 0 auto; background: #14141A; border: 1px solid #262633; border-radius: 16px; padding: 24px;">
+            <h2 style="color: #00b894; margin-top: 0;">🌐 Permintaan Setup Domain Baru</h2>
+            <p style="color: #8E8EA0;">Klien telah mengajukan permohonan domain kustom terima beres:</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Nama Bisnis:</td>
+                <td style="padding: 8px 0; color: #fff; font-weight: bold;">${businessName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Slug Website:</td>
+                <td style="padding: 8px 0; color: #fff; font-family: monospace;">${slug}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Domain Pilihan 1:</td>
+                <td style="padding: 8px 0; color: #00b894; font-weight: bold; font-family: monospace;">${requestedDomain}</td>
+              </tr>
+              ${alternativeDomain ? `
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Domain Cadangan:</td>
+                <td style="padding: 8px 0; color: #fff; font-family: monospace;">${alternativeDomain}</td>
+              </tr>` : ''}
+              ${whatsappContact ? `
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Kontak WhatsApp:</td>
+                <td style="padding: 8px 0; color: #fff;"><a href="https://wa.me/${whatsappContact.replace(/\D/g, '')}" style="color: #00b894;">${whatsappContact}</a></td>
+              </tr>` : ''}
+              ${userEmail ? `
+              <tr>
+                <td style="padding: 8px 0; color: #8E8EA0;">Email Klien:</td>
+                <td style="padding: 8px 0; color: #fff;">${userEmail}</td>
+              </tr>` : ''}
+            </table>
+            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #262633;">
+              <p style="font-size: 13px; color: #8E8EA0; margin: 0 0 12px 0;">Beli domain dan arahkan CNAME ke Vercel (<code>cname.vercel-dns.com</code>), lalu aktifkan di Konsol Super Admin:</p>
+              <a href="https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'growfin.my.id'}/back-stage" style="display: inline-block; background: #00b894; color: #000; font-weight: bold; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 13px;">Buka Super Admin Console</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    });
+
+    if (error) {
+      console.error('[Domain Request Email] Resend API error:', error);
+      return { success: false, error: error.message || String(error) };
+    }
+
+    console.log('[Domain Request Email] Dispatched email to admins:', data);
+    return { success: true, data };
+  } catch (error: any) {
+    console.error('[Domain Request Email] Failed to send email via Resend:', error);
+    return { success: false, error: error?.message || String(error) };
+  }
+}
+
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { siteConfig, PackageTier } from '@/lib/site-config';
 const midtransClient = require('midtrans-client');
 
 export async function POST(request: Request) {
@@ -8,14 +9,20 @@ export async function POST(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const { slug, amount, package_tier, user_id } = await request.json();
-    
-    // Default to 149000 if not provided
-    const finalAmount = amount || 149000;
+    const { slug, amount, package_tier, user_id, transaction_type } = await request.json();
 
     if (!user_id) {
        return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
+
+    // 1. Validasi tipe transaksi: 'activation' | 'upgrade' | 'renewal' (default: 'activation')
+    const allowedTypes = ['activation', 'upgrade', 'renewal'];
+    const finalTxType = allowedTypes.includes(transaction_type) ? transaction_type : 'activation';
+
+    // 2. Validasi harga berdasarkan siteConfig.pricing (harga penuh paket tujuan tanpa potongan prorata)
+    const targetTier: PackageTier = (package_tier as PackageTier) || 'instan';
+    const matchedPackage = siteConfig.pricing.find((p) => p.id === targetTier);
+    const finalAmount = matchedPackage?.priceNumeric || amount || 299000;
 
     // Get business demo ID
     const { data: businessData, error: businessError } = await supabaseAdmin
@@ -38,7 +45,7 @@ export async function POST(request: Request) {
        throw new Error('Failed to synchronize user profile.');
     }
 
-    // Insert pending transaction
+    // Insert pending transaction with snapshot_tier and transaction_type
     const { data: trxData, error: trxError } = await supabaseAdmin
       .from('transactions')
       .insert({
@@ -46,8 +53,8 @@ export async function POST(request: Request) {
         business_demo_id: businessData.id,
         amount: finalAmount,
         status: 'pending',
-        snapshot_tier: package_tier || 'instan',
-        transaction_type: 'activation'
+        snapshot_tier: targetTier,
+        transaction_type: finalTxType
       })
       .select('id')
       .single();

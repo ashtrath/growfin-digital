@@ -72,6 +72,8 @@ export interface BusinessDemo {
   lookbook?: LookbookItem[];
   heroImage?: string;
   heroImagePublicId?: string;
+  logoUrl?: string;
+  logoImagePublicId?: string;
   instagramFeed?: string[]; // Array of image URLs for social proof
   fbType?: 'DINE_IN' | 'QUICK_SERVICE' | 'PRE_ORDER'; // Determines order form fields
   themeColor?: string; // Hex color string, e.g. '#10b981'
@@ -84,6 +86,7 @@ export interface BusinessDemo {
   reviewsTitle?: string;
   reviewsDescription?: string;
   sectionOrder?: string[];
+  hiddenSections?: string[];
   marketing?: {
     promoLabel?: string;
     discountPercentage?: number;
@@ -105,6 +108,14 @@ export interface BusinessDemo {
     question: string;
     answer: string;
   }[];
+  domainRequest?: {
+    requestedDomain: string;       // contoh: "kopisenja.com"
+    alternativeDomain?: string;    // contoh: "kopisenjaid.com"
+    whatsappContact?: string;
+    status: 'pending' | 'processing' | 'active' | 'rejected';
+    requestedAt: string;
+    adminNotes?: string;
+  };
   doctor?: any;
   admin?: any;
   metadata?: any;

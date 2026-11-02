@@ -10,6 +10,7 @@ import { GroomingDemoClient } from '../grooming-demo-client';
 import { RetailDemoClient } from '../retail-demo-client';
 import { OwnerToolbar } from './OwnerToolbar';
 import { LiveEditorDrawer } from './LiveEditorDrawer';
+import { MobileSegmentedControl } from './MobileSegmentedControl';
 import { CheckoutModal } from '../checkout/CheckoutModal';
 import { siteConfig } from '@/lib/site-config';
 
@@ -74,11 +75,18 @@ export function DemoEditorWrapper({ initialClient, initialLayout, templateType, 
         }}
       />
 
+      {/* Floating Segmented Bar khusus layar HP: [ ✏️ Edit Formulir | 👁️ Intip Hasil ] */}
+      <MobileSegmentedControl 
+        isEditorOpen={isEditorOpen} 
+        onToggle={(open) => setIsEditorOpen(open)} 
+      />
+
       <CheckoutModal 
         isOpen={isCheckoutOpen} 
         onClose={() => setIsCheckoutOpen(false)} 
         slug={slug} 
         currentTier={client.package_tier}
+        client={client}
       />
 
       {/* Floating Support/Help CTA */}

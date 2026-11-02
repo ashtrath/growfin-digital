@@ -5,6 +5,7 @@ import { PremiumReviews } from './PremiumReviews';
 import { PremiumFooter } from './PremiumFooter';
 
 import { useFnbDemo } from '../../core/FnbDemoContext';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function PremiumLayout() {
   const { client } = useFnbDemo();
@@ -13,6 +14,7 @@ export function PremiumLayout() {
     : ['hero', 'menu', 'gallery', 'reviews'];
 
   const renderSection = (sectionId: string) => {
+    if (!isSectionVisible(sectionId, client.hiddenSections)) return null;
     switch (sectionId) {
       case 'hero': return <PremiumHeader key="hero" />;
       case 'menu': return <PremiumMenu key="menu" />;

@@ -32,6 +32,17 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
 
   const [findPhone, setFindPhone] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isMapsNotFound, setIsMapsNotFound] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
+
+  useEffect(() => {
+    let id = localStorage.getItem('growfin_device_id');
+    if (!id) {
+      id = 'dev_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      localStorage.setItem('growfin_device_id', id);
+    }
+    setDeviceId(id);
+  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -97,9 +108,10 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
     }
 
     setStep('loading');
+    setIsMapsNotFound(false);
 
     try {
-      const payload = { ...formData, force: isForce, isMapsMode };
+      const payload = { ...formData, force: isForce, isMapsMode, deviceId };
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -107,6 +119,13 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
       });
 
       const data = await res.json();
+
+      if (res.status === 404 || data.notFoundOnMaps) {
+        setIsMapsNotFound(true);
+        setErrorMsg(data.error || 'Bisnis tidak ditemukan di Google Maps.');
+        setStep('form');
+        return;
+      }
 
       if (data.needsConfirmation) {
         setRealName(data.realName);
@@ -239,14 +258,14 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
               <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
                 <button
                   type="button"
-                  onClick={() => setIsMapsMode(true)}
+                  onClick={() => { setIsMapsMode(true); setIsMapsNotFound(false); setErrorMsg(''); }}
                   className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isMapsMode ? 'bg-white text-emerald shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Bisnis Tersedia di Maps
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsMapsMode(false)}
+                  onClick={() => { setIsMapsMode(false); setIsMapsNotFound(false); setErrorMsg(''); }}
                   className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isMapsMode ? 'bg-white text-emerald shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Belum ada di Maps
@@ -256,6 +275,25 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
               {errorMsg && (
                 <div className="mb-4 p-3 bg-red-50 text-red-500 text-sm rounded-xl text-center font-bold">
                   {errorMsg}
+                </div>
+              )}
+
+              {isMapsNotFound && isMapsMode && (
+                <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald/20 rounded-2xl text-center">
+                  <p className="text-xs text-slate-600 mb-2 font-medium">
+                    Bisnis belum ada di Maps? Tenang, sistem kami tetap bisa membuatkan website untuk bisnis Anda!
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMapsMode(false);
+                      setIsMapsNotFound(false);
+                      setErrorMsg('');
+                    }}
+                    className="w-full py-2.5 px-3 bg-emerald hover:bg-emerald-light text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <span>Bisnis belum ada di Maps? Isi Deskripsi Manual ➔</span>
+                  </button>
                 </div>
               )}
 

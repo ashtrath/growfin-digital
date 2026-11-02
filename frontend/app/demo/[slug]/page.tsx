@@ -24,15 +24,39 @@ export async function generateMetadata({ params }: DemoPageProps): Promise<Metad
   // Fetch from Supabase
   const { data: dbData } = await supabase
     .from('business_demos')
-    .select('name')
+    .select('name, metadata, draft_metadata')
     .eq('slug', slug)
     .single();
 
   const clientName = dbData?.name || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const meta = dbData?.draft_metadata || dbData?.metadata;
+  const rawImage = meta?.logoUrl || meta?.heroImage || '/image/landing/growfin-logo-icon.png';
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'growfin.my.id';
+  const imageUrl = rawImage.startsWith('http')
+    ? rawImage
+    : `https://${rootDomain}${rawImage.startsWith('/') ? '' : '/'}${rawImage}`;
 
   return {
     title: `${clientName} — Live Demo Preview`,
     description: `Website preview untuk ${clientName}.`,
+    openGraph: {
+      title: `${clientName} — Live Demo Preview`,
+      description: `Website preview untuk ${clientName}.`,
+      images: [
+        {
+          url: imageUrl,
+          width: 1200,
+          height: 630,
+          alt: `${clientName} Preview Thumbnail`,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${clientName} — Live Demo Preview`,
+      description: `Website preview untuk ${clientName}.`,
+      images: [imageUrl],
+    },
   };
 }
 

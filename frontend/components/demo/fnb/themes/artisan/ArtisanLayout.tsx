@@ -3,8 +3,8 @@ import { ArtisanMenu } from './ArtisanMenu';
 import { ArtisanGallery } from './ArtisanGallery';
 import { ArtisanReviews } from './ArtisanReviews';
 import { ArtisanContact } from './ArtisanContact';
-
 import { useFnbDemo } from '../../core/FnbDemoContext';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function ArtisanLayout() {
   const { client } = useFnbDemo();
@@ -29,6 +29,7 @@ export function ArtisanLayout() {
       `}} />
       <div className="bg-stone-50 text-stone-800 antialiased selection:bg-brand-primary selection:text-white pb-28 font-sans-artisan">
         {order.map((sectionId) => {
+          if (!isSectionVisible(sectionId, client.hiddenSections)) return null;
           switch (sectionId) {
             case 'hero': return <ArtisanHeader key="hero" />;
             case 'menu': return <ArtisanMenu key="menu" />;

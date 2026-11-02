@@ -8,6 +8,7 @@ import { ArtisanProductGrid } from './ArtisanProductGrid';
 import { ArtisanReviews } from './ArtisanReviews';
 import { ArtisanFAQ } from './ArtisanFAQ';
 import { ArtisanFooter } from './ArtisanFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function ArtisanLayout({ client }: { client: BusinessDemo }) {
   const themeColor = client.themeColor || '#2D4739';
@@ -15,6 +16,7 @@ export function ArtisanLayout({ client }: { client: BusinessDemo }) {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni', 'faq'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <ArtisanHero key={id} />;
       case 'lookbook': return <ArtisanLookbook key={id} />;

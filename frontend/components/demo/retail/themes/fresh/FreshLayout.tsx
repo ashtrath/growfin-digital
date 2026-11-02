@@ -9,6 +9,7 @@ import { FreshReviews } from './FreshReviews';
 import { FreshFAQ } from './FreshFAQ';
 import { FreshFooter } from './FreshFooter';
 import { useRetailDemo } from '../../core/RetailDemoContext';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function FreshLayout({ client }: { client: BusinessDemo }) {
   const { cartItemCount, cartTotal, setIsCartDrawerOpen } = useRetailDemo();
@@ -17,6 +18,7 @@ export function FreshLayout({ client }: { client: BusinessDemo }) {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni', 'faq'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <FreshHero key={id} />;
       case 'lookbook': return <FreshLookbook key={id} />;

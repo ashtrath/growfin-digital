@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sendInvoiceEmail, resolveRecipientEmail } from '@/lib/email';
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     // 2. Ambil Data Transaksi dari Database
     const { data: trxData, error: trxFetchError } = await supabaseAdmin
       .from('transactions')
-      .select('id, status, user_id, business_demo_id, snapshot_tier, amount')
+      .select('id, status, user_id, business_demo_id, snapshot_tier, amount, transaction_type')
       .eq('id', order_id)
       .single();
 
@@ -142,31 +143,50 @@ export async function POST(request: Request) {
       if (trxData.business_demo_id) {
         const { data: businessData, error: bizFetchError } = await supabaseAdmin
           .from('business_demos')
-          .select('id, slug, name, draft_metadata, metadata, package_tier')
+          .select('id, slug, name, draft_metadata, metadata, package_tier, site_active_until, domain_active_until, status')
           .eq('id', trxData.business_demo_id)
           .single();
 
         if (bizFetchError) {
           console.error('[Midtrans Webhook] Failed to fetch business demo:', bizFetchError);
         } else if (businessData) {
+          const txType = trxData.transaction_type || 'activation';
           const tier = trxData.snapshot_tier || businessData.package_tier || 'instan';
+          const now = new Date();
           const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
-          // Aturan Masa Aktif:
-          // - instan: lifetime (site_active_until: null, domain_active_until: null)
-          // - pro-basic: lifetime website, domain 1 tahun (site_active_until: null, domain_active_until: 1 tahun)
-          // - pro-advanced: 1 tahun website & domain (site_active_until: 1 tahun, domain_active_until: 1 tahun)
           let siteActiveUntil: string | null = null;
           let domainActiveUntil: string | null = null;
 
-          if (tier === 'pro-advanced') {
-            siteActiveUntil = oneYearFromNow;
-            domainActiveUntil = oneYearFromNow;
-          } else if (tier === 'pro-basic') {
-            siteActiveUntil = null;
-            domainActiveUntil = oneYearFromNow;
+          // Untuk semua paket berbayar (instan, pro-basic, pro-advanced):
+          // 1. Logika site_active_until:
+          if (
+            txType === 'renewal' &&
+            businessData.site_active_until &&
+            new Date(businessData.site_active_until) > now
+          ) {
+            // Jika renewal dan site_active_until masih di masa depan (belum expired),
+            // tambahkan +365 hari dari tanggal yang ada agar sisa hari tidak hangus
+            const currentExpiry = new Date(businessData.site_active_until);
+            siteActiveUntil = new Date(currentExpiry.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
           } else {
-            siteActiveUntil = null;
+            // Jika upgrade, activation, atau jika website sudah terlanjur expired
+            siteActiveUntil = oneYearFromNow;
+          }
+
+          // 2. Logika domain_active_until (khusus untuk pro-basic ke atas):
+          if (tier === 'pro-basic' || tier === 'pro-advanced' || tier === 'enterprise') {
+            if (
+              txType === 'renewal' &&
+              businessData.domain_active_until &&
+              new Date(businessData.domain_active_until) > now
+            ) {
+              const currentDomainExpiry = new Date(businessData.domain_active_until);
+              domainActiveUntil = new Date(currentDomainExpiry.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+            } else {
+              domainActiveUntil = oneYearFromNow;
+            }
+          } else {
             domainActiveUntil = null;
           }
 
@@ -211,6 +231,14 @@ export async function POST(request: Request) {
               }
             } catch (emailErr) {
               console.error('[Midtrans Webhook] Non-blocking invoice email dispatch error:', emailErr);
+            }
+
+            // D. On-Demand Revalidation: Segarkan cache situs publik secara instan
+            try {
+              revalidatePath(`/${businessData.slug}`);
+              revalidatePath(`/site/${businessData.slug}`);
+            } catch (revalidateErr) {
+              console.warn('[Midtrans Webhook] Revalidation error:', revalidateErr);
             }
           }
         }

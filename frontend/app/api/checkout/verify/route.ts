@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import { sendInvoiceEmail, resolveRecipientEmail } from '@/lib/email';
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
         payment_gateway_ref: payment_gateway_ref || null,
       })
       .eq('id', order_id)
-      .select('user_id, snapshot_tier, amount, paid_at, payment_method')
+      .select('user_id, snapshot_tier, amount, paid_at, payment_method, transaction_type')
       .single();
 
     if (trxError) throw trxError;
@@ -43,30 +44,53 @@ export async function POST(request: Request) {
     // 3. Fetch the business demo to finalize it
     const { data: businessData, error: fetchBizError } = await supabaseAdmin
       .from('business_demos')
-      .select('name, draft_metadata, metadata, package_tier')
+      .select('name, draft_metadata, metadata, package_tier, site_active_until, domain_active_until, status')
       .eq('slug', slug)
       .single();
 
     if (fetchBizError) throw fetchBizError;
 
+    const txType = trxData.transaction_type || 'activation';
     const tier = trxData.snapshot_tier || businessData?.package_tier || 'instan';
+    const now = new Date();
     const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
     let siteActiveUntil: string | null = null;
     let domainActiveUntil: string | null = null;
 
-    if (tier === 'pro-advanced') {
-      siteActiveUntil = oneYearFromNow;
-      domainActiveUntil = oneYearFromNow;
-    } else if (tier === 'pro-basic') {
-      siteActiveUntil = null;
-      domainActiveUntil = oneYearFromNow;
+    // Untuk semua paket berbayar (instan, pro-basic, pro-advanced):
+    // 1. Logika site_active_until:
+    if (
+      txType === 'renewal' && 
+      businessData?.site_active_until && 
+      new Date(businessData.site_active_until) > now
+    ) {
+      // Jika renewal dan site_active_until masih di masa depan (belum expired),
+      // tambahkan +365 hari dari tanggal site_active_until yang ada (agar sisa hari tidak hangus)
+      const currentExpiry = new Date(businessData.site_active_until);
+      siteActiveUntil = new Date(currentExpiry.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
     } else {
-      siteActiveUntil = null;
+      // Jika upgrade, activation, atau jika website sudah terlanjur expired
+      siteActiveUntil = oneYearFromNow;
+    }
+
+    // 2. Logika domain_active_until (khusus untuk pro-basic ke atas):
+    if (tier === 'pro-basic' || tier === 'pro-advanced' || tier === 'enterprise') {
+      if (
+        txType === 'renewal' &&
+        businessData?.domain_active_until &&
+        new Date(businessData.domain_active_until) > now
+      ) {
+        const currentDomainExpiry = new Date(businessData.domain_active_until);
+        domainActiveUntil = new Date(currentDomainExpiry.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      } else {
+        domainActiveUntil = oneYearFromNow;
+      }
+    } else {
       domainActiveUntil = null;
     }
 
-    // 4. Mark the business as published, link user, copy draft to metadata, and set expiration
+    // 4. Mark the business as published (unlocking if previously locked), link user, copy draft to metadata, and set expiration
     const { error: bizError } = await supabaseAdmin
       .from('business_demos')
       .update({ 
@@ -105,6 +129,14 @@ export async function POST(request: Request) {
       }
     } catch (emailErr) {
       console.error('[Verify Route] Non-blocking invoice email dispatch error:', emailErr);
+    }
+
+    // 6. On-Demand Revalidation: Segarkan cache situs publik secara instan
+    try {
+      revalidatePath(`/${slug}`);
+      revalidatePath(`/site/${slug}`);
+    } catch (revalidateErr) {
+      console.warn('[Verify Route] Revalidation error:', revalidateErr);
     }
 
     return NextResponse.json({ success: true });

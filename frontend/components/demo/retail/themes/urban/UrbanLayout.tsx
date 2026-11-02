@@ -9,6 +9,7 @@ import { UrbanReviews } from './UrbanReviews';
 import { UrbanFAQ } from './UrbanFAQ';
 import { UrbanFooter } from './UrbanFooter';
 import { BusinessDemo } from '@/lib/types';
+import { isSectionVisible } from '@/lib/section-utils';
 
 function RetailDemoContent() {
   const { client } = useRetailDemo();
@@ -16,6 +17,7 @@ function RetailDemoContent() {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <UrbanHero key={id} />;
       case 'lookbook': return <UrbanLookbook key={id} />;

@@ -4,6 +4,7 @@ import { ElegantGallery } from './ElegantGallery';
 import { ElegantReviews } from './ElegantReviews';
 import { ElegantFooter } from './ElegantFooter';
 import { useFnbDemo } from '../../core/FnbDemoContext';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function ElegantLayout() {
   const { client } = useFnbDemo();
@@ -28,6 +29,7 @@ export function ElegantLayout() {
       `}} />
       <div className="bg-stone-50 text-stone-900 antialiased selection:bg-brand-primary selection:text-white pb-20 font-sans-bakery">
         {order.map((sectionId) => {
+          if (!isSectionVisible(sectionId, client.hiddenSections)) return null;
           switch (sectionId) {
             case 'hero': return <ElegantHeader key="hero" />;
             case 'menu': return <ElegantMenu key="menu" />;

@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { resolveTemplateType } from '@/lib/template-resolver';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Resend } from 'resend';
+import { checkRateLimit, extractDeviceId, getClientIp } from '@/lib/rate-limit';
 
 // 1. Inisialisasi Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -132,7 +133,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, slug: existingData[0].slug, isExisting: true });
     }
 
-    // 2. Validasi ke Google Places API (New)
+    // 2. Hybrid Rate Limiting (Device Token max 3/24h & Shared IP max 20/24h)
+    const deviceId = extractDeviceId(request, body.deviceId);
+    const clientIp = getClientIp(request);
+
+    const rateLimit = await checkRateLimit(request, deviceId);
+    if (!rateLimit.allowed) {
+      const resp = NextResponse.json(
+        { error: rateLimit.message },
+        { status: 429 }
+      );
+      resp.cookies.set('growfin_device_id', deviceId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 365,
+        path: '/',
+      });
+      return resp;
+    }
+
+    // 3. Validasi ke Google Places API (New)
     const googleApiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!googleApiKey) {
       return NextResponse.json({ error: 'Google Maps API Key not configured.' }, { status: 500 });
@@ -258,7 +279,10 @@ export async function POST(request: Request) {
       // Jika tidak ditemukan di Google Maps, tolak registrasi
       if (places.length === 0) {
         return NextResponse.json(
-          { error: 'Bisnis tidak ditemukan di Google Maps. Pastikan URL Maps valid atau Nama sesuai dengan yang terdaftar.' },
+          { 
+            error: 'Bisnis tidak ditemukan di Google Maps. Pastikan URL Maps valid atau Nama sesuai dengan yang terdaftar.',
+            notFoundOnMaps: true
+          },
           { status: 404 }
         );
       }
@@ -392,7 +416,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // 6. Simpan ke Supabase beserta metadata
+    // 6. Simpan ke Supabase beserta metadata & fomo_expires_at
+    const fomoExpiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
     const { data, error } = await supabase
       .from('business_demos')
       .insert([
@@ -403,8 +429,9 @@ export async function POST(request: Request) {
           phone: normalizedPhone,
           city,
           maps_url: mapsUrl,
-          metadata: { ...metadata, userEmail: email },
-          draft_metadata: { ...metadata, userEmail: email },
+          fomo_expires_at: fomoExpiresAt,
+          metadata: { ...metadata, userEmail: email, deviceId, clientIp },
+          draft_metadata: { ...metadata, userEmail: email, deviceId, clientIp },
           scraping_status: 'completed',
           layout_id: defaultLayoutId
         }
@@ -417,33 +444,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Gagal menyimpan demo ke database.' }, { status: 500 });
     }
 
-    // 7. Kirim Email Notifikasi via Resend
+    // 7. Kirim Email Notifikasi via Resend di background (Non-blocking serverless via after())
     const previewUrl = `https://growfin.my.id/demo/${slug}`;
-    try {
-      await resend.emails.send({
-        from: 'Growfin <hello@growfin.my.id>', // Make sure domain is verified on Resend
-        to: email,
-        subject: 'Website Bisnis Anda Sudah Siap',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
-            <h2 style="color: #00b894;">Halo Pemilik ${realName}</h2>
-            <p>Sistem kami telah selesai meracik website untuk bisnis <b>${realName}</b>.</p>
-            <p>Silakan klik tombol di bawah ini untuk melihat hasilnya secara live:</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${previewUrl}" style="background-color: #00b894; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">Lihat Website Saya</a>
+    after(async () => {
+      try {
+        await resend.emails.send({
+          from: 'Growfin <hello@growfin.my.id>', // Make sure domain is verified on Resend
+          to: email,
+          subject: 'Website Bisnis Anda Sudah Siap',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
+              <h2 style="color: #00b894;">Halo Pemilik ${realName}</h2>
+              <p>Sistem kami telah selesai meracik website untuk bisnis <b>${realName}</b>.</p>
+              <p>Silakan klik tombol di bawah ini untuk melihat hasilnya secara live:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${previewUrl}" style="background-color: #00b894; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">Lihat Website Saya</a>
+              </div>
+              <p>Atau copy link berikut: <br><a href="${previewUrl}" style="color: #00b894;">${previewUrl}</a></p>
+              <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+              <p style="font-size: 12px; color: #999;">Email ini dikirim secara otomatis. Jika Anda butuh bantuan, balas email ke growfin.id@gmail.com atau hubungi tim kami.</p>
             </div>
-            <p>Atau copy link berikut: <br><a href="${previewUrl}" style="color: #00b894;">${previewUrl}</a></p>
-            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-            <p style="font-size: 12px; color: #999;">Email ini dikirim secara otomatis. Jika Anda butuh bantuan, balas email ke growfin.id@gmail.com atau hubungi tim kami.</p>
-          </div>
-        `
-      });
-    } catch (e) {
-      console.error('Failed to send email:', e);
-      // We don't fail the request if email fails, but we can log it.
-    }
+          `
+        });
+      } catch (e) {
+        console.error('[Generate Route] Failed to send email in background:', e);
+      }
+    });
 
-    return NextResponse.json({ success: true, slug: data.slug, isExisting: false });
+    const response = NextResponse.json({ success: true, slug: data.slug, isExisting: false });
+    response.cookies.set('growfin_device_id', deviceId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 365,
+      path: '/',
+    });
+    return response;
 
   } catch (error) {
     console.error('API Error:', error);

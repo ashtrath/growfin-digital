@@ -4,6 +4,7 @@ import { VibrantLookbook } from './VibrantLookbook';
 import { VibrantMenu } from './VibrantMenu';
 import { VibrantReviews } from './VibrantReviews';
 import { VibrantFooter } from './VibrantFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function VibrantLayout() {
   const { client } = useFnbDemo();
@@ -21,9 +22,9 @@ export function VibrantLayout() {
       `}} />
       <div className="bg-brand-light/20 text-stone-800 antialiased selection:bg-brand-primary/30 selection:text-brand-primary pb-20 font-sans-bubbletea">
         <VibrantHeader />
-        <VibrantLookbook />
-        <VibrantMenu />
-        <VibrantReviews />
+        {isSectionVisible('gallery', client.hiddenSections) && <VibrantLookbook />}
+        {isSectionVisible('menu', client.hiddenSections) && <VibrantMenu />}
+        {isSectionVisible('reviews', client.hiddenSections) && <VibrantReviews />}
         <VibrantFooter />
       </div>
     </>

@@ -8,11 +8,13 @@ import { TechLookbook } from './TechLookbook';
 import { TechReviews } from './TechReviews';
 import { TechFAQ } from './TechFAQ';
 import { TechFooter } from './TechFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function TechLayout({ client }: { client: BusinessDemo }) {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni', 'faq'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <TechHero key={id} />;
       case 'lookbook': return <TechLookbook key={id} />;

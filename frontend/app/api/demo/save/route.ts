@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
+import { PackageTier, PACKAGE_LIMITS } from '@/lib/site-config';
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -45,7 +47,34 @@ export async function POST(request: Request) {
     // 3. Keamanan Status: metadata dan kolom root HANYA disalin/di-update
     // jika publish: true DAN bisnis memang sudah berstatus 'published' (sudah menyelesaikan pembayaran)
     if (publish && isPublishedBusiness) {
-      payload.metadata = clientData;
+      const activeTier = (existingDemo.package_tier as PackageTier) || 'instan';
+      const tierLimits = PACKAGE_LIMITS[activeTier] || PACKAGE_LIMITS['instan'];
+
+      // Sanitasi Server-Side: Batasi fitur sesuai hak akses paket
+      const sanitizedMarketing = tierLimits.promoFeatures
+        ? clientData.marketing
+        : { usps: clientData.marketing?.usps || [] };
+
+      const sanitizedUiLabels = tierLimits.promoFeatures
+        ? clientData.uiLabels
+        : undefined;
+
+      const sanitizedMenu = Array.isArray(clientData.menu)
+        ? clientData.menu.slice(0, tierLimits.maxProducts)
+        : clientData.menu;
+
+      const sanitizedCategories = Array.isArray(clientData.categories)
+        ? clientData.categories.slice(0, tierLimits.maxCategories)
+        : clientData.categories;
+
+      payload.metadata = {
+        ...clientData,
+        menu: sanitizedMenu,
+        categories: sanitizedCategories,
+        marketing: sanitizedMarketing,
+        uiLabels: sanitizedUiLabels,
+      };
+
       if (clientData.name) {
         payload.name = clientData.name;
       }
@@ -70,6 +99,14 @@ export async function POST(request: Request) {
         { error: 'Gagal menyimpan perubahan ke database.', details: error.message, code: error.code },
         { status: 500 }
       );
+    }
+
+    // On-Demand Revalidation: Segarkan cache situs publik secara instan
+    try {
+      revalidatePath(`/${slug}`);
+      revalidatePath(`/site/${slug}`);
+    } catch (revalidateErr) {
+      console.warn('[Save API] Revalidation error:', revalidateErr);
     }
 
     return NextResponse.json({

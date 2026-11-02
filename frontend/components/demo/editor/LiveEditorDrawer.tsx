@@ -1,9 +1,9 @@
 'use client';
 
-import { X, Save, Image as ImageIcon, Type, Plus, Trash2, Edit2, LayoutTemplate, Rocket, Palette, Store, LayoutDashboard, ShoppingBag, HeartHandshake, ChevronRight, ArrowLeft, Clock, MapPin, Phone, Mail, MessageSquare, Star, Users, HelpCircle, Tag, Settings, Link, Percent, Calendar } from 'lucide-react';
+import { X, Save, Check, Eye, EyeOff, Image as ImageIcon, Type, Plus, Trash2, Edit2, LayoutTemplate, Rocket, Palette, Store, LayoutDashboard, ShoppingBag, HeartHandshake, ChevronRight, ArrowLeft, Clock, MapPin, Phone, Mail, MessageSquare, Star, Users, HelpCircle, Tag, Settings, Link, Percent, Calendar } from 'lucide-react';
 import { BusinessDemo, MenuItem } from '@/lib/types';
-import { useState } from 'react';
-import { PACKAGE_LIMITS } from '@/lib/site-config';
+import { useState, useEffect, useRef } from 'react';
+import { PackageTier, PACKAGE_LIMITS } from '@/lib/site-config';
 import { CloudinaryUploader } from '@/components/dashboard/CloudinaryUploader';
 import { createClient } from '@/utils/supabase/client';
 
@@ -44,6 +44,8 @@ export function LiveEditorDrawer({
   const [activeCategory, setActiveCategory] = useState<CategoryId | null>(null);
   const [isPublishConfirmOpen, setIsPublishConfirmOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [isDirty, setIsDirty] = useState(false);
 
   // States for Menu Editor Form
   const [editingMenuIdx, setEditingMenuIdx] = useState<number | null>(null);
@@ -52,7 +54,88 @@ export function LiveEditorDrawer({
   const [pendingImageToDelete, setPendingImageToDelete] = useState<string | null>(null);
   const [tempUploadedPublicIds, setTempUploadedPublicIds] = useState<string[]>([]);
 
+  // Refs for Tracking Changes & Preventing Stale Closures
+  const isInitialMount = useRef(true);
+  const lastSavedPayloadRef = useRef<string>(JSON.stringify({ client, layoutVariant }));
+  const latestClientRef = useRef(client);
+  const latestLayoutRef = useRef(layoutVariant);
+
+  useEffect(() => {
+    latestClientRef.current = client;
+    latestLayoutRef.current = layoutVariant;
+  }, [client, layoutVariant]);
+
+  // 1. Debounced Auto-Save (2.5 Detik)
+  useEffect(() => {
+    // Abaikan auto-save pada inisialisasi awal render
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const currentPayload = JSON.stringify({ client, layoutVariant });
+    if (currentPayload === lastSavedPayloadRef.current) {
+      return;
+    }
+
+    setIsDirty(true);
+    setSaveStatus('saving');
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/demo/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slug,
+            clientData: latestClientRef.current,
+            layout_id: latestLayoutRef.current,
+            publish: false
+          })
+        });
+
+        if (!res.ok) throw new Error('Auto-save failed');
+
+        lastSavedPayloadRef.current = JSON.stringify({
+          client: latestClientRef.current,
+          layoutVariant: latestLayoutRef.current
+        });
+        setIsDirty(false);
+        setSaveStatus('saved');
+      } catch (err) {
+        console.error('Auto-save error:', err);
+        setSaveStatus('error');
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [client, layoutVariant, slug]);
+
+  // 2. beforeunload Protection saat ada perubahan data belum tersimpan
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const isMenuFormDirty = !!(editingMenuIdx !== null || menuForm.name?.trim() || menuForm.price?.trim());
+      if (isDirty || isMenuFormDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isDirty, editingMenuIdx, menuForm.name, menuForm.price]);
+
   const supabase = createClient();
+
+  const currentTier: PackageTier = (client.package_tier || 'free_trial') as PackageTier;
+  const limits = PACKAGE_LIMITS[currentTier] || PACKAGE_LIMITS['free_trial'];
+  const isTrial = currentTier === 'free_trial';
+  const tierLimits = limits;
+  const isFreeTrial = isTrial;
+  const canEditPromo = limits.promoFeatures;
 
   const deleteCloudinaryImage = async (publicId: string | null | undefined) => {
     if (!publicId) return;
@@ -128,6 +211,16 @@ export function LiveEditorDrawer({
   const handleSaveMenuForm = async () => {
     if (!menuForm.name?.trim() || !menuForm.price?.trim()) {
       setMenuFormError('Nama produk dan harga wajib diisi ya!');
+      return;
+    }
+
+    // Validasi Batas Kategori (maxCategories)
+    const trimmedCat = menuForm.category?.trim();
+    const existingCategories = client.categories || [];
+    const isNewCategory = trimmedCat && !existingCategories.includes(trimmedCat);
+
+    if (isNewCategory && existingCategories.length >= limits.maxCategories) {
+      alert(`Batas kategori untuk paket ${currentTier.toUpperCase()} adalah maksimal ${limits.maxCategories} kategori. Silakan pilih kategori yang sudah ada atau upgrade paket Anda.`);
       return;
     }
 
@@ -238,6 +331,7 @@ export function LiveEditorDrawer({
 
   const handleSaveToAPI = async (publish: boolean) => {
     setIsSaving(true);
+    if (!publish) setSaveStatus('saving');
     try {
       const res = await fetch('/api/demo/save', {
         method: 'POST',
@@ -252,6 +346,10 @@ export function LiveEditorDrawer({
       if (!res.ok) throw new Error('Failed to save');
       const resData = await res.json();
 
+      lastSavedPayloadRef.current = JSON.stringify({ client, layoutVariant });
+      setIsDirty(false);
+      setSaveStatus('saved');
+
       if (publish && (!client.package_tier || client.package_tier === 'free_trial' || resData.requiresUpgrade)) {
         onClose();
         onUpgradeClick();
@@ -260,6 +358,7 @@ export function LiveEditorDrawer({
       }
     } catch (error) {
       console.error(error);
+      if (!publish) setSaveStatus('error');
       alert('Waduh, gagal nyimpen nih. Coba lagi ya.');
     } finally {
       setIsSaving(false);
@@ -287,7 +386,7 @@ export function LiveEditorDrawer({
       )}
 
       {isPublishConfirmOpen && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white border border-slate-200 p-6 md:p-8 rounded-3xl max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 border border-emerald-200">
               <Rocket className="w-7 h-7" />
@@ -319,19 +418,47 @@ export function LiveEditorDrawer({
       <div className={`fixed top-0 right-0 h-full w-full sm:w-[420px] bg-slate-50 border-l border-slate-200 z-[120] transform transition-transform duration-300 ease-out flex flex-col shadow-2xl ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-white">
-          <h3 className="font-extrabold text-slate-900 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
               <Settings className="w-4 h-4" />
             </div>
-            Editor Praktis
-          </h3>
+            <div>
+              <h3 className="font-extrabold text-slate-900 leading-tight">Editor Praktis</h3>
+              {/* Status Auto-save Indicator */}
+              <div className="flex items-center gap-1.5 text-[11px] font-medium transition-all mt-0.5">
+                {saveStatus === 'saving' && (
+                  <span className="text-amber-600 flex items-center gap-1.5 animate-in fade-in duration-150">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Menyimpan draf...
+                  </span>
+                )}
+                {saveStatus === 'saved' && (
+                  <span className="text-emerald-600 flex items-center gap-1 animate-in fade-in duration-150">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+                    Tersimpan otomatis ✓
+                  </span>
+                )}
+                {saveStatus === 'error' && (
+                  <span className="text-rose-500 flex items-center gap-1.5 animate-in fade-in duration-150">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    Gagal menyimpan draf
+                  </span>
+                )}
+                {saveStatus === 'idle' && (
+                  <span className="text-slate-400 text-[10px]">
+                    Siap diedit
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-5 scrollbar-hide relative">
+        <div className="flex-1 overflow-y-auto p-5 pb-24 sm:pb-5 scrollbar-hide relative">
 
           {/* CATEGORY LIST (MASTER VIEW) */}
           {!activeCategory && (
@@ -418,6 +545,15 @@ export function LiveEditorDrawer({
                             handleChange('sectionOrder', newOrder);
                           };
 
+                          const toggleHideSection = (sectionId: string) => {
+                            const currentHidden = client.hiddenSections || [];
+                            const isHidden = currentHidden.includes(sectionId);
+                            const nextHidden = isHidden
+                              ? currentHidden.filter(id => id !== sectionId)
+                              : [...currentHidden, sectionId];
+                            handleChange('hiddenSections', nextHidden);
+                          };
+
                           const retailLabels: Record<string, string> = {
                             hero: 'Banner Utama',
                             lookbook: 'Galeri Lookbook',
@@ -439,19 +575,65 @@ export function LiveEditorDrawer({
                             return fnbLabels[id] || id;
                           };
 
-                          return currentOrder.map((sectionId, idx) => (
-                            <div key={sectionId} className="flex items-center justify-between p-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors rounded-lg">
-                              <span className={`text-sm font-bold ${sectionId === 'hero' ? 'text-slate-400' : 'text-slate-700'}`}>
-                                {getSectionLabel(sectionId)} {sectionId === 'hero' && <span className="text-[10px] text-slate-400 font-normal ml-1">(Tetap di atas)</span>}
-                              </span>
-                              {sectionId !== 'hero' && (
-                                <div className="flex gap-1">
-                                  <button onClick={() => moveUp(idx)} disabled={idx <= 1} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-md disabled:opacity-30">↑</button>
-                                  <button onClick={() => moveDown(idx)} disabled={idx === currentOrder.length - 1} className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-md disabled:opacity-30">↓</button>
-                                </div>
-                              )}
-                            </div>
-                          ));
+                          return currentOrder.map((sectionId, idx) => {
+                            const isHidden = (client.hiddenSections || []).includes(sectionId);
+                            return (
+                              <div
+                                key={sectionId}
+                                className={`flex items-center justify-between p-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors rounded-lg ${
+                                  isHidden ? 'bg-slate-50/80 opacity-60' : ''
+                                }`}
+                              >
+                                <span className={`text-sm font-bold flex items-center gap-2 ${
+                                  sectionId === 'hero' ? 'text-slate-400' : isHidden ? 'text-slate-400 line-through' : 'text-slate-700'
+                                }`}>
+                                  {getSectionLabel(sectionId)}
+                                  {sectionId === 'hero' && (
+                                    <span className="text-[10px] text-slate-400 font-normal ml-1">(Tetap di atas)</span>
+                                  )}
+                                  {isHidden && (
+                                    <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-normal no-underline">
+                                      Disembunyikan
+                                    </span>
+                                  )}
+                                </span>
+                                {sectionId !== 'hero' && (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleHideSection(sectionId)}
+                                      className={`p-1.5 rounded-md transition-all ${
+                                        isHidden
+                                          ? 'text-amber-600 bg-amber-50 hover:bg-amber-100 hover:scale-105'
+                                          : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                      title={isHidden ? 'Tampilkan kembali seksi ini' : 'Sembunyikan seksi ini'}
+                                    >
+                                      {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => moveUp(idx)}
+                                      disabled={idx <= 1}
+                                      className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-md disabled:opacity-30 transition-colors"
+                                      title="Geser ke atas"
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => moveDown(idx)}
+                                      disabled={idx === currentOrder.length - 1}
+                                      className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-md disabled:opacity-30 transition-colors"
+                                      title="Geser ke bawah"
+                                    >
+                                      ↓
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
                         })()}
                       </div>
                     )}
@@ -508,17 +690,47 @@ export function LiveEditorDrawer({
                   </div>
 
                   <div className="space-y-4 pt-6 border-t border-slate-200">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Kata-kata di Tombol (Call to Action)</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Kata-kata di Tombol (Call to Action)</label>
+                      {isTrial ? (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                          ✨ Fitur Pro Basic (Gratis Dicoba di Mode Demo)
+                        </span>
+                      ) : !limits.promoFeatures ? (
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <Lock className="w-3 h-3" /> Terkunci (Paket Instan)
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {!limits.promoFeatures && (
+                      <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3 text-xs">
+                        <p className="font-semibold text-amber-900 flex items-center gap-1.5">
+                          <span>🔒</span> Fitur Flash Sale, Badge Diskon & Custom Tombol eksklusif untuk Paket Pro Basic & Pro Advanced.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={onUpgradeClick}
+                          className="px-3.5 py-2 bg-[#00b894] hover:bg-[#00e0b8] text-black font-extrabold rounded-lg text-xs transition-all whitespace-nowrap shadow-sm shrink-0 active:scale-95 text-center"
+                        >
+                          Upgrade ke Pro Basic
+                        </button>
+                      </div>
+                    )}
+
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
                         <Type className="w-4 h-4 text-slate-400" /> Tombol Beli / Pesan
                       </label>
                       <input
                         type="text"
+                        disabled={!limits.promoFeatures}
                         placeholder="Misal: Pesan Sekarang / Beli Langsung"
                         value={client.uiLabels?.buyButtonText || ''}
                         onChange={(e) => handleChange('uiLabels', { ...client.uiLabels, buyButtonText: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !limits.promoFeatures ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -527,10 +739,13 @@ export function LiveEditorDrawer({
                       </label>
                       <input
                         type="text"
+                        disabled={!limits.promoFeatures}
                         placeholder="Misal: Inspirasi Setup / Galeri"
                         value={client.uiLabels?.lookbookButtonText || ''}
                         onChange={(e) => handleChange('uiLabels', { ...client.uiLabels, lookbookButtonText: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !limits.promoFeatures ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -539,10 +754,13 @@ export function LiveEditorDrawer({
                       </label>
                       <input
                         type="text"
+                        disabled={!limits.promoFeatures}
                         placeholder="Misal: Liat Menu Lainnya / Buka Etalase"
                         value={client.uiLabels?.viewAllButtonText || ''}
                         onChange={(e) => handleChange('uiLabels', { ...client.uiLabels, viewAllButtonText: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !limits.promoFeatures ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                     </div>
                   </div>
@@ -550,10 +768,35 @@ export function LiveEditorDrawer({
                   <div className="space-y-4 pt-6 border-t border-slate-200">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Promo & Flash Sale (Marketing)</label>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
-                        Aktif di Banner
-                      </span>
+                      {isTrial ? (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                          ✨ Fitur Pro Basic (Gratis Dicoba di Mode Demo)
+                        </span>
+                      ) : !limits.promoFeatures ? (
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <Lock className="w-3 h-3" /> Terkunci (Paket Instan)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          Aktif di Banner
+                        </span>
+                      )}
                     </div>
+
+                    {!limits.promoFeatures && (
+                      <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3 text-xs">
+                        <p className="font-semibold text-amber-900 flex items-center gap-1.5">
+                          <span>🔒</span> Fitur Flash Sale, Badge Diskon & Custom Tombol eksklusif untuk Paket Pro Basic & Pro Advanced.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={onUpgradeClick}
+                          className="px-3.5 py-2 bg-[#00b894] hover:bg-[#00e0b8] text-black font-extrabold rounded-lg text-xs transition-all whitespace-nowrap shadow-sm shrink-0 active:scale-95 text-center"
+                        >
+                          Upgrade ke Pro Basic
+                        </button>
+                      </div>
+                    )}
 
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
@@ -561,10 +804,13 @@ export function LiveEditorDrawer({
                       </label>
                       <input
                         type="text"
+                        disabled={!canEditPromo}
                         placeholder="Misal: Promo Gila! / Penawaran Terbatas"
                         value={client.marketing?.promoLabel || ''}
                         onChange={(e) => handleChange('marketing', { ...client.marketing, promoLabel: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !canEditPromo ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                     </div>
 
@@ -576,10 +822,13 @@ export function LiveEditorDrawer({
                         type="number"
                         min="0"
                         max="100"
+                        disabled={!canEditPromo}
                         placeholder="Misal: 25"
                         value={client.marketing?.discountPercentage ?? ''}
                         onChange={(e) => handleChange('marketing', { ...client.marketing, discountPercentage: Number(e.target.value) })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !canEditPromo ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                     </div>
 
@@ -589,9 +838,12 @@ export function LiveEditorDrawer({
                       </label>
                       <input
                         type="datetime-local"
+                        disabled={!canEditPromo}
                         value={client.marketing?.flashSaleEnd ? client.marketing.flashSaleEnd.slice(0, 16) : ''}
                         onChange={(e) => handleChange('marketing', { ...client.marketing, flashSaleEnd: e.target.value })}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all"
+                        className={`w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none shadow-sm transition-all ${
+                          !canEditPromo ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : ''
+                        }`}
                       />
                       <p className="text-[11px] text-slate-400">
                         Atur batas waktu untuk memunculkan badge countdown atau batas akhir promo di etalase/banner.
@@ -864,10 +1116,10 @@ export function LiveEditorDrawer({
                     </div>
                   ) : (
                     <>
-                      {(client.menu?.length || 0) >= (PACKAGE_LIMITS[client.package_tier || 'free_trial'] || PACKAGE_LIMITS['free_trial']).maxProducts ? (
+                      {(client.menu?.length || 0) >= limits.maxProducts ? (
                         <button onClick={onUpgradeClick} className="w-full py-5 border-2 border-dashed border-amber-300 bg-amber-50 text-amber-700 rounded-2xl font-bold flex flex-col justify-center items-center gap-2 hover:bg-amber-100 transition-colors text-sm">
                           <span className="flex items-center gap-2"><Star className="w-5 h-5 text-amber-500" /> Udah Mentok Nih Kuotanya</span>
-                          <span className="text-xs font-medium opacity-80 text-center px-4">Paket {client.package_tier} cuma bisa muat {(PACKAGE_LIMITS[client.package_tier || 'free_trial'] || PACKAGE_LIMITS['free_trial']).maxProducts} produk. Yuk upgrade biar bisa jualan lebih banyak!</span>
+                          <span className="text-xs font-medium opacity-80 text-center px-4">Paket {currentTier.toUpperCase()} cuma bisa muat {limits.maxProducts} produk. Yuk upgrade biar bisa jualan lebih banyak!</span>
                         </button>
                       ) : (
                         <button onClick={() => openMenuForm(null)} className="w-full py-4 border-2 border-dashed border-emerald-300 bg-emerald-50 text-emerald-600 rounded-2xl font-bold flex justify-center items-center gap-2 hover:bg-emerald-100 transition-colors text-sm">
@@ -1040,7 +1292,7 @@ export function LiveEditorDrawer({
         </div>
 
         {/* Floating Footer */}
-        <div className="p-5 border-t border-slate-200 bg-white/90 backdrop-blur-md flex gap-3 z-20">
+        <div className="p-5 pb-20 sm:pb-5 border-t border-slate-200 bg-white/90 backdrop-blur-md flex gap-3 z-20">
           <button
             onClick={() => handleSaveToAPI(false)}
             disabled={isSaving}

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient as createServerSupabase } from '@/utils/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { isAdminEmail } from '@/lib/admin';
@@ -41,7 +42,7 @@ export async function GET() {
     // 1. Fetch all business_demos
     const { data: tenants, error: tenantsError } = await supabaseAdmin
       .from('business_demos')
-      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, created_at, updated_at, user_id')
+      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, created_at, updated_at, user_id, metadata, draft_metadata')
       .order('created_at', { ascending: false });
 
     if (tenantsError) {
@@ -178,6 +179,42 @@ export async function PATCH(request: Request) {
             .replace(/\/+$/, '')
         : null;
       updatePayload.custom_domain = cleanDomain;
+
+      // Jika Super Admin mengisi kolom custom_domain, otomatis ubah metadata.domainRequest.status = 'active'
+      if (cleanDomain) {
+        const supabaseAdmin = getSupabaseAdmin();
+        const { data: currentBiz } = await supabaseAdmin
+          .from('business_demos')
+          .select('metadata, draft_metadata')
+          .eq('id', id)
+          .single();
+
+        if (currentBiz) {
+          const currentMeta = currentBiz.metadata || {};
+          const currentDraft = currentBiz.draft_metadata || {};
+
+          if (currentMeta.domainRequest) {
+            updatePayload.metadata = {
+              ...currentMeta,
+              domainRequest: {
+                ...currentMeta.domainRequest,
+                status: 'active',
+                activatedAt: new Date().toISOString(),
+              },
+            };
+          }
+          if (currentDraft.domainRequest) {
+            updatePayload.draft_metadata = {
+              ...currentDraft,
+              domainRequest: {
+                ...currentDraft.domainRequest,
+                status: 'active',
+                activatedAt: new Date().toISOString(),
+              },
+            };
+          }
+        }
+      }
     }
 
     const supabaseAdmin = getSupabaseAdmin();
@@ -185,12 +222,22 @@ export async function PATCH(request: Request) {
       .from('business_demos')
       .update(updatePayload)
       .eq('id', id)
-      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, fomo_expires_at, created_at, updated_at, user_id')
+      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, fomo_expires_at, created_at, updated_at, user_id, metadata, draft_metadata')
       .single();
 
     if (updateError) {
       console.error('[Admin API PATCH Error]:', updateError);
       return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    // On-Demand Revalidation: Segarkan cache situs publik secara instan
+    if (updatedTenant?.slug) {
+      try {
+        revalidatePath(`/${updatedTenant.slug}`);
+        revalidatePath(`/site/${updatedTenant.slug}`);
+      } catch (revalidateErr) {
+        console.warn('[Admin API] Revalidation error:', revalidateErr);
+      }
     }
 
     return NextResponse.json({

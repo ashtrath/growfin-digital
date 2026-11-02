@@ -51,7 +51,7 @@ export default async function BackstagePage() {
   const [tenantsResult, transactionsResult] = await Promise.all([
     supabaseAdmin
       .from('business_demos')
-      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, fomo_expires_at, created_at, updated_at, user_id')
+      .select('id, name, slug, category, city, status, package_tier, custom_domain, site_active_until, domain_active_until, fomo_expires_at, created_at, updated_at, user_id, metadata, draft_metadata')
       .order('created_at', { ascending: false }),
     supabaseAdmin
       .from('transactions')

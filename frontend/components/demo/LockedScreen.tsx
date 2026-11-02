@@ -15,7 +15,7 @@ interface LockedScreenProps {
 }
 
 export function LockedScreen({ type, businessName, isClaimed, slug, currentTier }: LockedScreenProps) {
-  const isFomo = type === 'subscription_expired';
+  const isFomo = type === 'fomo_expired';
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
   return (
@@ -42,32 +42,33 @@ export function LockedScreen({ type, businessName, isClaimed, slug, currentTier 
                 : `Masa aktif langganan buat ${businessName} udah abis nih. No worries, yukk perpanjang biar web nya online lagi.`}
           </p>
 
-          {!isClaimed ? (
-            <button
-              onClick={() => setIsCheckoutOpen(true)}
-              className="block w-full bg-[#00b894] hover:bg-[#00e0b8] text-white font-extrabold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all relative z-10 active:scale-95"
-            >
-              Klaim Website Ini 🚀
-            </button>
-          ) : (
-            <Link
-              href="/login"
-              className="block w-full bg-[#00b894] hover:bg-[#00e0b8] text-white font-extrabold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all relative z-10 active:scale-95"
-            >
-              Onlinekan Sekarang 🚀
-            </Link>
+          <button
+            onClick={() => setIsCheckoutOpen(true)}
+            className="block w-full bg-[#00b894] hover:bg-[#00e0b8] text-white font-extrabold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all relative z-10 active:scale-95"
+          >
+            {!isClaimed ? 'Klaim Website Ini 🚀' : 'Onlinekan Sekarang 🚀'}
+          </button>
+
+          {isClaimed && (
+            <div className="mt-4 relative z-10">
+              <Link
+                href="/dashboard"
+                className="text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors inline-flex items-center gap-1"
+              >
+                Kembali ke Dashboard
+              </Link>
+            </div>
           )}
         </div>
       </div>
 
-      {!isClaimed && (
-        <CheckoutModal 
-          isOpen={isCheckoutOpen} 
-          onClose={() => setIsCheckoutOpen(false)} 
-          slug={slug} 
-          currentTier={currentTier}
-        />
-      )}
+      <CheckoutModal 
+        isOpen={isCheckoutOpen} 
+        onClose={() => setIsCheckoutOpen(false)} 
+        slug={slug} 
+        currentTier={currentTier}
+        isRenewal={isClaimed}
+      />
     </>
   );
 }

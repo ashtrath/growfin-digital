@@ -8,11 +8,13 @@ import { DarkLookbook } from './DarkLookbook';
 import { DarkReviews } from './DarkReviews';
 import { DarkFAQ } from './DarkFAQ';
 import { DarkFooter } from './DarkFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function DarkLayout({ client }: { client: BusinessDemo }) {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni', 'faq'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <DarkHero key={id} />;
       case 'lookbook': return <DarkLookbook key={id} />;

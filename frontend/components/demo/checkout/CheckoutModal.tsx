@@ -7,12 +7,15 @@ import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import { siteConfig } from '@/lib/site-config';
 import { trackMetaEvent } from '@/lib/fpixel';
+import { BusinessDemo } from '@/lib/types';
 
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   slug: string;
   currentTier?: string;
+  isRenewal?: boolean;
+  client?: BusinessDemo;
 }
 
 const TIER_RANK: Record<string, number> = {
@@ -23,7 +26,7 @@ const TIER_RANK: Record<string, number> = {
   'enterprise': 4
 };
 
-export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutModalProps) {
+export function CheckoutModal({ isOpen, onClose, slug, currentTier, isRenewal, client }: CheckoutModalProps) {
   const router = useRouter();
   const supabase = createClient();
   const [step, setStep] = useState<'auth' | 'payment' | 'success'>('auth');
@@ -37,6 +40,7 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
   const [authError, setAuthError] = useState('');
 
   // Payment States
+  const [hasPromoConfigured, setHasPromoConfigured] = useState(false);
   const currentRank = TIER_RANK[currentTier || 'free_trial'] || 0;
 
   const packages = siteConfig.pricing
@@ -46,11 +50,13 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
       name: p.titleId,
       price: p.priceNumeric,
       desc: p.descId,
-      isDisabled: TIER_RANK[p.id] <= currentRank
+      isDisabled: isRenewal ? false : TIER_RANK[p.id] <= currentRank
     }));
   
-  // Set default selected package to the first available upgrade
-  const availableUpgrade = packages.find(p => !p.isDisabled) || packages[packages.length - 1];
+  // Set default selected package to the first available upgrade or current tier if renewal
+  const availableUpgrade = isRenewal
+    ? (packages.find(p => p.id === currentTier) || packages.find(p => !p.isDisabled) || packages[0])
+    : (packages.find(p => !p.isDisabled) || packages[packages.length - 1]);
   const [selectedPackage, setSelectedPackage] = useState(availableUpgrade);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
 
@@ -68,12 +74,35 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
       setIsCheckingSession(false);
     };
     if (isOpen) {
+      if (availableUpgrade) {
+        setSelectedPackage(availableUpgrade);
+      }
       checkSession();
+
+      // Cek apakah user sudah mengisi promo saat masa trial
+      const promoLabel = client?.marketing?.promoLabel;
+      const discountPercentage = client?.marketing?.discountPercentage;
+      if (promoLabel || (discountPercentage !== undefined && discountPercentage > 0)) {
+        setHasPromoConfigured(true);
+      } else if (slug) {
+        supabase
+          .from('business_demos')
+          .select('draft_metadata, metadata')
+          .eq('slug', slug)
+          .single()
+          .then(({ data }) => {
+            const m = data?.draft_metadata?.marketing || data?.metadata?.marketing;
+            if (m?.promoLabel || (m?.discountPercentage !== undefined && m.discountPercentage > 0)) {
+              setHasPromoConfigured(true);
+            }
+          });
+      }
+
       trackMetaEvent('InitiateCheckout', {
-        content_name: selectedPackage?.name || 'Paket Website Growfin',
+        content_name: (availableUpgrade || selectedPackage)?.name || 'Paket Website Growfin',
         content_category: 'Website Subscription',
-        content_ids: selectedPackage ? [selectedPackage.id] : [],
-        value: selectedPackage?.price || 0,
+        content_ids: (availableUpgrade || selectedPackage) ? [(availableUpgrade || selectedPackage).id] : [],
+        value: (availableUpgrade || selectedPackage)?.price || 0,
         currency: 'IDR'
       });
     }
@@ -141,6 +170,10 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
     setIsPaymentLoading(true);
     try {
       // Get midtrans token from backend
+      const txType = isRenewal 
+        ? 'renewal' 
+        : (currentTier && currentTier !== 'free_trial' ? 'upgrade' : 'activation');
+
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,7 +181,8 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
           slug, 
           amount: selectedPackage.price,
           package_tier: selectedPackage.id,
-          user_id: userId
+          user_id: userId,
+          transaction_type: txType
         })
       });
       
@@ -179,6 +213,7 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
               payment_gateway_ref: result.transaction_id
             })
           });
+          router.refresh();
           setStep('success');
         },
         onPending: function (result: any) {
@@ -222,7 +257,7 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
           <div className="flex items-center justify-between p-6 border-b border-[#262633]">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Lock className="w-5 h-5 text-[#00b894]" />
-              {step === 'auth' ? 'Amankan Website Anda' : step === 'payment' ? 'Selesaikan Pembayaran' : 'Selamat!'}
+              {step === 'auth' ? (isRenewal ? 'Masuk ke Akun Anda' : 'Amankan Website Anda') : step === 'payment' ? 'Selesaikan Pembayaran' : 'Selamat!'}
             </h2>
             {step !== 'success' && (
               <button onClick={onClose} className="text-[#8E8EA0] hover:text-white transition-colors">
@@ -236,7 +271,7 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
             <div className="flex p-6 bg-[#0B0B0E] border-b border-[#262633]">
               <div className={`flex items-center text-sm font-semibold ${step === 'auth' ? 'text-[#00b894]' : 'text-[#8E8EA0]'}`}>
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center mr-2 border-2 ${step === 'auth' ? 'border-[#00b894]' : 'border-[#262633]'}`}>1</div>
-                Buat Akun
+                {isRenewal ? 'Masuk Akun' : 'Buat Akun'}
               </div>
               <div className="mx-4 text-[#262633]">
                 <ChevronRight className="w-5 h-5" />
@@ -257,7 +292,9 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
             ) : step === 'auth' ? (
               <form onSubmit={handleAuth} className="space-y-4">
                 <p className="text-[#8E8EA0] text-sm mb-6">
-                  Buat akun untuk mengklaim kepemilikan website ini. Nantinya akun ini digunakan untuk masuk ke Dashboard Admin.
+                  {isRenewal
+                    ? 'Masuk atau daftarkan akun Anda untuk mengaktifkan kembali website ini. Akun ini digunakan untuk mengakses Dashboard Admin.'
+                    : 'Buat akun untuk mengklaim kepemilikan website ini. Nantinya akun ini digunakan untuk masuk ke Dashboard Admin.'}
                 </p>
                 {authError && (
                   <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-xl text-red-500 text-sm">
@@ -317,7 +354,7 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
                     >
                       <div>
                         <div className={`font-bold ${pkg.isDisabled ? 'text-[#8E8EA0]' : selectedPackage.id === pkg.id ? 'text-[#00b894]' : 'text-white'}`}>
-                          {pkg.name} {pkg.isDisabled && '(Paket Saat Ini/Lebih Rendah)'}
+                          {pkg.name} {pkg.isDisabled ? '(Paket Saat Ini/Lebih Rendah)' : (isRenewal && pkg.id === currentTier ? '(Paket Saat Ini)' : '')}
                         </div>
                         <div className="text-xs text-[#8E8EA0] mt-1">{pkg.desc}</div>
                       </div>
@@ -327,6 +364,16 @@ export function CheckoutModal({ isOpen, onClose, slug, currentTier }: CheckoutMo
                     </button>
                   ))}
                 </div>
+
+                {/* Peringatan Downgrade Fitur jika memilih Paket Instan padahal sudah isi Promo saat trial */}
+                {hasPromoConfigured && selectedPackage.id === 'instan' && (
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
+                    <span className="text-base shrink-0 leading-none">ℹ️</span>
+                    <p className="leading-relaxed">
+                      <strong className="text-amber-200">Catatan:</strong> Paket Instan tidak mencakup fitur Flash Sale/Promo Badge & Domain .com. Pilih <strong>Pro Basic</strong> agar fitur promo yang sudah Anda atur tetap tampil di website publik.
+                    </p>
+                  </div>
+                )}
 
                 <div className="bg-[#0B0B0E] border border-[#262633] rounded-xl p-5">
                   <ul className="space-y-3 mb-6">

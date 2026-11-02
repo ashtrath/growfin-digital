@@ -29,6 +29,8 @@ export function SettingsForm({ initialData }: { initialData: any }) {
     address: meta.address || '',
     heroImage: meta.heroImage || '',
     heroImagePublicId: meta.heroImagePublicId || '',
+    logoUrl: meta.logoUrl || meta.logo_url || '',
+    logoImagePublicId: meta.logoImagePublicId || '',
     menu: meta.menu || meta.products || [],
   });
 
@@ -45,6 +47,19 @@ export function SettingsForm({ initialData }: { initialData: any }) {
     setFormData(prev => ({ ...prev, heroImage: url, heroImagePublicId: publicId }));
   };
 
+  const handleLogoUpload = async (url: string, publicId: string) => {
+    if (formData.logoImagePublicId) {
+      try {
+        await supabase.functions.invoke('delete-cloudinary-image', {
+          body: { public_id: formData.logoImagePublicId }
+        });
+      } catch (err) {
+        console.error("Failed to delete old logo:", err);
+      }
+    }
+    setFormData(prev => ({ ...prev, logoUrl: url, logoImagePublicId: publicId }));
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -55,6 +70,8 @@ export function SettingsForm({ initialData }: { initialData: any }) {
       // Update both column and metadata
       const updatedMetadata = {
         ...meta,
+        logoUrl: formData.logoUrl,
+        logoImagePublicId: formData.logoImagePublicId,
         description: formData.description,
         heroTitle: formData.heroTitle,
         heroSubtitle: formData.heroSubtitle,
@@ -156,6 +173,37 @@ export function SettingsForm({ initialData }: { initialData: any }) {
             className="w-full bg-[#0B0B0E] border border-[#262633] rounded-xl px-4 py-3 text-white focus:border-[#00b894] focus:outline-none transition-colors resize-none"
             placeholder="Ceritakan sedikit tentang bisnis Anda..."
           />
+        </div>
+
+        {/* Logo Bisnis (Opsional untuk WhatsApp & OpenGraph) */}
+        <div className="space-y-3 pt-3 border-t border-[#262633]">
+          <label className="text-xs font-bold text-[#8E8EA0] uppercase flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <span>Logo Bisnis (Opsional)</span>
+            <span className="text-[11px] text-[#00b894] font-normal normal-case">
+              - Digunakan untuk thumbnail WhatsApp, OpenGraph & Google Local
+            </span>
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+            <CloudinaryUploader 
+              currentImageUrl={formData.logoUrl}
+              onUploadSuccess={handleLogoUpload}
+              label="Unggah File Logo"
+            />
+            <div className="space-y-2">
+              <label className="text-xs text-[#8E8EA0]">Atau Masukkan URL Logo Langsung:</label>
+              <input 
+                type="url"
+                name="logoUrl"
+                value={formData.logoUrl}
+                onChange={handleChange}
+                placeholder="https://example.com/logo.png"
+                className="w-full bg-[#0B0B0E] border border-[#262633] rounded-xl px-4 py-3 text-white focus:border-[#00b894] focus:outline-none transition-colors text-sm font-mono"
+              />
+              <p className="text-xs text-[#8E8EA0] leading-relaxed">
+                Rekomendasi rasio 1:1 atau 1200x630px. Jika belum diisi, foto banner utama (Hero Image) otomatis dijadikan gambar thumbnail pratinjau.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

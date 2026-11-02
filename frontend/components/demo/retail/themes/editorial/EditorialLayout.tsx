@@ -8,11 +8,13 @@ import { EditorialProductGrid } from './EditorialProductGrid';
 import { EditorialReviews } from './EditorialReviews';
 import { EditorialFAQ } from './EditorialFAQ';
 import { EditorialFooter } from './EditorialFooter';
+import { isSectionVisible } from '@/lib/section-utils';
 
 export function EditorialLayout({ client }: { client: BusinessDemo }) {
   const order = client.sectionOrder || ['hero', 'lookbook', 'katalog', 'testimoni', 'faq'];
 
   const renderSection = (id: string) => {
+    if (!isSectionVisible(id, client.hiddenSections)) return null;
     switch (id) {
       case 'hero': return <EditorialHero key={id} />;
       case 'lookbook': return <EditorialLookbook key={id} />;
